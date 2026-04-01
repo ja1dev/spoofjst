@@ -115,7 +115,7 @@ class DeviceManager:
         try:
             self.lockdown = await create_using_usbmux(serial=udid)
 
-            all_values = self.lockdown.all_values
+            all_values = await self.lockdown.get_value()
             name = all_values.get("DeviceName", "Unknown")
             model = all_values.get("ProductType", "Unknown")
             ios_version = all_values.get("ProductVersion", "0.0")
@@ -123,7 +123,7 @@ class DeviceManager:
             # Check developer mode (iOS 16+)
             dev_mode = True
             try:
-                val = self.lockdown.get_value(domain="com.apple.security.mac.amfi", key="DeveloperModeStatus")
+                val = await self.lockdown.get_value(domain="com.apple.security.mac.amfi", key="DeveloperModeStatus")
                 if val is not None:
                     dev_mode = bool(val)
             except Exception:
@@ -150,7 +150,7 @@ class DeviceManager:
                 success = await self.tunnel.start(udid)
                 if success:
                     await self._notify("tunnel_status", {"status": "connected"})
-                    self.location.set_service_provider(self.tunnel.get_service_provider())
+                    self.location.set_service_provider(await self.tunnel.get_service_provider())
                 else:
                     await self._notify("tunnel_status", {"status": "error", "message": "Failed to establish tunnel"})
             else:
@@ -165,7 +165,7 @@ class DeviceManager:
 
     async def disconnect(self) -> None:
         """Disconnect from current device and tear down tunnel."""
-        self.location.clear_provider()
+        await self.location.clear_provider()
         await self.tunnel.stop()
         self.lockdown = None
         self.device_info = None

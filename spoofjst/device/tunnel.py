@@ -143,7 +143,7 @@ class TunnelManager:
             logger.exception("Error parsing tunnel output")
             return False
 
-    def get_service_provider(self):
+    async def get_service_provider(self):
         """Return a RemoteServiceDiscoveryService connected through the tunnel."""
         if self.status != "connected" or not self._rsd_address or not self._rsd_port:
             return None
@@ -151,7 +151,7 @@ class TunnelManager:
         try:
             from pymobiledevice3.remote.remote_service_discovery import RemoteServiceDiscoveryService
             rsd = RemoteServiceDiscoveryService((self._rsd_address, self._rsd_port))
-            rsd.connect()
+            await rsd.connect()
             self._service_provider = rsd
             return rsd
         except Exception:
