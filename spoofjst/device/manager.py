@@ -47,6 +47,7 @@ class DeviceManager:
         self.location: LocationService = LocationService()
         self._poll_task: asyncio.Task | None = None
         self._listeners: list[Callable] = []
+        self._connect_lock: asyncio.Lock = asyncio.Lock()
 
     def add_listener(self, callback: Callable) -> None:
         self._listeners.append(callback)
@@ -56,7 +57,7 @@ class DeviceManager:
             self._listeners.remove(callback)
 
     async def _notify(self, event: str, data: dict[str, Any] | None = None) -> None:
-        for cb in self._listeners:
+        for cb in list(self._listeners):  # iterate copy to avoid mutation issues
             try:
                 await cb(event, data or {})
             except Exception:
@@ -93,11 +94,16 @@ class DeviceManager:
             return
 
         if devices and self.device_info is None:
-            # New device detected — connect to first one
-            dev = devices[0]
-            udid = dev.serial
-            logger.info("Device detected: %s", udid)
-            await self._connect(udid)
+            # New device detected — connect to first one (with lock to prevent races)
+            if self._connect_lock.locked():
+                return
+            async with self._connect_lock:
+                if self.device_info is not None:
+                    return  # another poll cycle already connected
+                dev = devices[0]
+                udid = dev.serial
+                logger.info("Device detected: %s", udid)
+                await self._connect(udid)
 
     async def _connect(self, udid: str) -> None:
         """Connect to a device by UDID: lockdown, read info, start tunnel."""
