@@ -106,7 +106,23 @@ The setup script installs everything automatically:
 
 The Pi will reboot. After this you **no longer need your home WiFi** — the Pi runs its own hotspot.
 
-## Step 5: Use It
+## Step 5: Enable Developer Mode (First Time Only)
+
+After the Pi reboots, SSH back in over your home WiFi (before the hotspot takes over):
+
+```bash
+ssh pi@raspberrypi.local
+```
+
+Plug your iPhone into the Pi's **right port** (DATA) via OTG adapter. Unlock iPhone and tap **Trust This Computer**, then:
+
+```bash
+sudo /home/pi/spoofjst/.venv/bin/pymobiledevice3 amfi enable-developer-mode
+```
+
+iPhone will reboot. Tap **Turn On** when prompted. This is a one-time step — you never need to do it again.
+
+## Step 6: Use It
 
 1. Plug power bank into Pi's **left port** (PWR)
 2. Plug iPhone into Pi's **right port** (DATA) using the USB-C OTG adapter + cable
@@ -115,7 +131,7 @@ The Pi will reboot. After this you **no longer need your home WiFi** — the Pi 
 5. Open Safari → `http://192.168.4.1`
 6. Tap the map to spoof your location
 
-## Daily Use (After First Setup)
+## Daily Use (After First-Time Setup)
 
 1. Plug in power bank → plug in iPhone
 2. Join `spoofjst` WiFi
