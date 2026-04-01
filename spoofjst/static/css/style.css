@@ -229,3 +229,49 @@ h2 {
     background: #ccc;
     border-radius: 2px;
 }
+
+/* Mobile / Pi Zero mode (iPhone Safari) */
+@media (max-width: 480px) {
+    #sidebar {
+        top: auto;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        width: 100%;
+        max-height: 45vh;
+        border-radius: 16px 16px 0 0;
+        padding: 16px;
+        padding-bottom: calc(16px + env(safe-area-inset-bottom));
+    }
+
+    h1 {
+        font-size: 1.2em;
+        margin-bottom: 12px;
+    }
+
+    .panel {
+        margin-bottom: 12px;
+        padding-bottom: 12px;
+    }
+
+    .btn {
+        padding: 12px 16px;
+        font-size: 1em;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    .coord-display input {
+        max-width: none;
+        padding: 10px;
+        font-size: 1em;
+    }
+
+    .search-row input {
+        padding: 10px;
+        font-size: 1em;
+    }
+
+    .btn-small {
+        padding: 10px 16px;
+    }
+}
