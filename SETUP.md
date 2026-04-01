@@ -34,8 +34,12 @@ pip3 install -e .
 1. Plug iPhone into Mac via USB
 2. Unlock it and tap **Trust This Computer** if prompted
 3. Enable Developer Mode (one-time):
-   - Settings → Privacy & Security → Developer Mode → ON
-   - iPhone will reboot — confirm when prompted
+   ```bash
+   sudo pymobiledevice3 amfi enable-developer-mode
+   ```
+   - iPhone will reboot
+   - After reboot, tap **Turn On** when prompted to confirm Developer Mode
+   - Note: You can also enable it via Settings → Privacy & Security → Developer Mode, but that toggle only appears after connecting to Xcode
 
 **Run it:**
 
