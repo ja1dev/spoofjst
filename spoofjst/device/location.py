@@ -30,7 +30,7 @@ class LocationService:
             return {"success": False, "error": "No device connected"}
 
         try:
-            await asyncio.to_thread(self._set_location_sync, lat, lon)
+            await self._set_location_async(lat, lon)
             self.current_location = {"lat": lat, "lon": lon}
             logger.info("Location set to %f, %f", lat, lon)
             return {"success": True, "lat": lat, "lon": lon}
@@ -38,13 +38,14 @@ class LocationService:
             logger.exception("Failed to set location")
             return {"success": False, "error": str(e)}
 
-    def _set_location_sync(self, lat: float, lon: float) -> None:
-        """Synchronous location set — runs in thread."""
-        from pymobiledevice3.services.dvt.dvt_secure_socket_proxy import DvtSecureSocketProxyService
+    async def _set_location_async(self, lat: float, lon: float) -> None:
+        """Set location using the async DvtProvider API (pymobiledevice3 9.x)."""
+        from pymobiledevice3.services.dvt.instruments.dvt_provider import DvtProvider
         from pymobiledevice3.services.dvt.instruments.location_simulation import LocationSimulation
 
-        with DvtSecureSocketProxyService(lockdown=self._service_provider) as dvt:
-            LocationSimulation(dvt).set(lat, lon)
+        async with DvtProvider(lockdown=self._service_provider) as dvt:
+            loc = LocationSimulation(dvt)
+            await loc.set(lat, lon)
 
     async def clear_location(self) -> dict[str, Any]:
         """Restore real GPS location."""
@@ -52,7 +53,7 @@ class LocationService:
             return {"success": False, "error": "No device connected"}
 
         try:
-            await asyncio.to_thread(self._clear_location_sync)
+            await self._clear_location_async()
             self.current_location = None
             logger.info("Location cleared")
             return {"success": True}
@@ -60,10 +61,11 @@ class LocationService:
             logger.exception("Failed to clear location")
             return {"success": False, "error": str(e)}
 
-    def _clear_location_sync(self) -> None:
-        """Synchronous location clear — runs in thread."""
-        from pymobiledevice3.services.dvt.dvt_secure_socket_proxy import DvtSecureSocketProxyService
+    async def _clear_location_async(self) -> None:
+        """Clear location using the async DvtProvider API (pymobiledevice3 9.x)."""
+        from pymobiledevice3.services.dvt.instruments.dvt_provider import DvtProvider
         from pymobiledevice3.services.dvt.instruments.location_simulation import LocationSimulation
 
-        with DvtSecureSocketProxyService(lockdown=self._service_provider) as dvt:
-            LocationSimulation(dvt).clear()
+        async with DvtProvider(lockdown=self._service_provider) as dvt:
+            loc = LocationSimulation(dvt)
+            await loc.clear()

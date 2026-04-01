@@ -84,22 +84,27 @@ class DeviceManager:
 
     async def _check_devices(self) -> None:
         """Check for USB-connected iOS devices."""
-        devices = await asyncio.to_thread(list_devices)
+        try:
+            devices = await list_devices()
+        except (FileNotFoundError, ConnectionRefusedError, OSError):
+            # usbmuxd not running — no devices possible
+            if self.device_info is not None:
+                await self.disconnect()
+                await self._notify("device_disconnected")
+            return
 
         if not devices and self.device_info is not None:
-            # Device was disconnected
             logger.info("Device disconnected: %s", self.device_info.name)
             await self.disconnect()
             await self._notify("device_disconnected")
             return
 
         if devices and self.device_info is None:
-            # New device detected — connect to first one (with lock to prevent races)
             if self._connect_lock.locked():
                 return
             async with self._connect_lock:
                 if self.device_info is not None:
-                    return  # another poll cycle already connected
+                    return
                 dev = devices[0]
                 udid = dev.serial
                 logger.info("Device detected: %s", udid)
@@ -108,9 +113,9 @@ class DeviceManager:
     async def _connect(self, udid: str) -> None:
         """Connect to a device by UDID: lockdown, read info, start tunnel."""
         try:
-            self.lockdown = await asyncio.to_thread(create_using_usbmux, serial=udid)
+            self.lockdown = await create_using_usbmux(serial=udid)
 
-            all_values = await asyncio.to_thread(lambda: dict(self.lockdown.all_values))
+            all_values = self.lockdown.all_values
             name = all_values.get("DeviceName", "Unknown")
             model = all_values.get("ProductType", "Unknown")
             ios_version = all_values.get("ProductVersion", "0.0")
@@ -118,11 +123,9 @@ class DeviceManager:
             # Check developer mode (iOS 16+)
             dev_mode = True
             try:
-                dev_mode = await asyncio.to_thread(
-                    lambda: self.lockdown.get_value(domain="com.apple.security.mac.amfi", key="DeveloperModeStatus")
-                )
-                if dev_mode is None:
-                    dev_mode = True  # Pre-iOS 16 doesn't have this
+                val = self.lockdown.get_value(domain="com.apple.security.mac.amfi", key="DeveloperModeStatus")
+                if val is not None:
+                    dev_mode = bool(val)
             except Exception:
                 pass
 
@@ -131,7 +134,7 @@ class DeviceManager:
                 name=name,
                 model=model,
                 ios_version=ios_version,
-                developer_mode=bool(dev_mode),
+                developer_mode=dev_mode,
             )
 
             await self._notify("device_connected", self.device_info.to_dict())
@@ -151,7 +154,6 @@ class DeviceManager:
                 else:
                     await self._notify("tunnel_status", {"status": "error", "message": "Failed to establish tunnel"})
             else:
-                # iOS < 17: use lockdown directly
                 self.location.set_service_provider(self.lockdown)
                 await self._notify("tunnel_status", {"status": "connected"})
 
