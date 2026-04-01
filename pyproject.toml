@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "spoofjst"
+version = "0.1.0"
+description = "iPhone GPS location spoofer over USB — supports iOS 17/18+"
+requires-python = ">=3.10"
+dependencies = [
+    "pymobiledevice3>=4.0.0",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "python-multipart>=0.0.6",
+]
+
+[project.scripts]
+spoofjst = "spoofjst.__main__:main"
