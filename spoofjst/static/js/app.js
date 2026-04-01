@@ -10,6 +10,7 @@
     const btnClear = document.getElementById("btn-clear");
     const btnSearch = document.getElementById("btn-search");
     const searchInput = document.getElementById("search-input");
+    const toastEl = document.getElementById("toast");
 
     const statusEl = document.getElementById("device-status");
     const statusText = document.getElementById("status-text");
@@ -20,6 +21,27 @@
     const tunnelStatus = document.getElementById("tunnel-status");
 
     let deviceConnected = false;
+    let toastTimeout = null;
+
+    // ---- Toast notifications (replaces alert()) ----
+
+    function showToast(message, type) {
+        type = type || "info";
+        if (toastTimeout) clearTimeout(toastTimeout);
+        toastEl.textContent = message;
+        toastEl.className = "show " + type;
+        toastTimeout = setTimeout(() => {
+            toastEl.className = "";
+        }, 3500);
+    }
+
+    // ---- Dismiss keyboard helper ----
+
+    function dismissKeyboard() {
+        if (document.activeElement && document.activeElement.blur) {
+            document.activeElement.blur();
+        }
+    }
 
     // ---- API helpers ----
 
@@ -32,11 +54,11 @@
             });
             const data = await resp.json();
             if (!data.success) {
-                alert("Failed to set location: " + (data.error || "Unknown error"));
+                showToast("Failed: " + (data.error || "Unknown error"), "error");
             }
             return data;
         } catch (e) {
-            alert("Network error: " + e.message);
+            showToast("Network error: " + e.message, "error");
             return { success: false };
         }
     }
@@ -46,11 +68,13 @@
             const resp = await fetch("/api/location/clear", { method: "POST" });
             const data = await resp.json();
             if (!data.success) {
-                alert("Failed to clear: " + (data.error || "Unknown error"));
+                showToast("Failed: " + (data.error || "Unknown error"), "error");
+            } else {
+                showToast("Location restored to real GPS", "success");
             }
             return data;
         } catch (e) {
-            alert("Network error: " + e.message);
+            showToast("Network error: " + e.message, "error");
             return { success: false };
         }
     }
@@ -88,7 +112,7 @@
             btnSet.disabled = true;
             btnClear.disabled = true;
         } else {
-            statusEl.className = "status disconnected";
+            statusEl.className = "status error";
             statusText.textContent = device.name + " — Error";
             tunnelStatus.textContent = tunnel || "Error";
             deviceConnected = false;
@@ -106,13 +130,15 @@
 
     function onMapClick(lat, lon) {
         updateCoordInputs(lat, lon);
-        // Auto-set if device is connected
+        dismissKeyboard();
         if (deviceConnected) {
             apiSetLocation(lat, lon);
         }
     }
 
     // ---- WebSocket events ----
+
+    let lastStatusFetch = 0;
 
     DeviceClient.onEvent((event, data) => {
         switch (event) {
@@ -126,19 +152,30 @@
 
             case "device_connected":
                 updateDeviceUI(data, "connecting");
+                showToast("iPhone detected — connecting...", "info");
                 break;
 
             case "device_disconnected":
                 updateDeviceUI(null, "disconnected");
                 SpoofMap.clearMarker();
+                showToast("iPhone disconnected", "error");
                 break;
 
-            case "tunnel_status":
-                // Refresh full status
+            case "tunnel_status": {
+                // Debounce: don't fetch more than once per 2s
+                const now = Date.now();
+                if (now - lastStatusFetch < 2000) break;
+                lastStatusFetch = now;
                 fetch("/api/device")
                     .then((r) => r.json())
-                    .then((s) => updateDeviceUI(s.device, s.tunnel));
+                    .then((s) => {
+                        updateDeviceUI(s.device, s.tunnel);
+                        if (s.tunnel === "connected") {
+                            showToast("Ready — tap the map to spoof!", "success");
+                        }
+                    });
                 break;
+            }
 
             case "location_set":
                 updateCoordInputs(data.lat, data.lon);
@@ -159,15 +196,17 @@
         const lat = parseFloat(latInput.value);
         const lon = parseFloat(lonInput.value);
         if (isNaN(lat) || isNaN(lon)) {
-            alert("Enter valid coordinates or click the map.");
+            showToast("Enter coordinates or tap the map", "error");
             return;
         }
+        dismissKeyboard();
         SpoofMap.setMarker(lat, lon);
         SpoofMap.flyTo(lat, lon);
         apiSetLocation(lat, lon);
     });
 
     btnClear.addEventListener("click", () => {
+        dismissKeyboard();
         apiClearLocation();
         SpoofMap.clearMarker();
     });
@@ -177,9 +216,12 @@
     async function doSearch() {
         const q = searchInput.value.trim();
         if (!q) return;
+        dismissKeyboard();
         const found = await SpoofMap.searchPlace(q);
-        if (!found) {
-            alert("Place not found: " + q);
+        if (found) {
+            searchInput.value = "";
+        } else {
+            showToast("Place not found: " + q, "error");
         }
     }
 

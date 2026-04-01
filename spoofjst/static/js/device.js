@@ -1,11 +1,15 @@
 /**
  * WebSocket client for real-time device status updates.
+ * Includes exponential backoff reconnection for mobile battery efficiency.
  */
 
 const DeviceClient = (() => {
     let ws = null;
     let reconnectTimer = null;
+    let reconnectDelay = 2000;
+    const MAX_RECONNECT_DELAY = 16000;
     const listeners = [];
+    let pingInterval = null;
 
     function connect() {
         const protocol = location.protocol === "https:" ? "wss:" : "ws:";
@@ -13,12 +17,24 @@ const DeviceClient = (() => {
 
         ws = new WebSocket(url);
 
-        ws.onopen = () => {
-            console.log("[ws] connected");
-            if (reconnectTimer) {
-                clearTimeout(reconnectTimer);
-                reconnectTimer = null;
+        // Connection timeout — if no open event in 10s, retry
+        const connectTimeout = setTimeout(() => {
+            if (ws.readyState !== WebSocket.OPEN) {
+                ws.close();
             }
+        }, 10000);
+
+        ws.onopen = () => {
+            clearTimeout(connectTimeout);
+            reconnectDelay = 2000; // reset backoff on successful connect
+
+            // Keep-alive ping every 30s (iOS kills idle connections)
+            if (pingInterval) clearInterval(pingInterval);
+            pingInterval = setInterval(() => {
+                if (ws.readyState === WebSocket.OPEN) {
+                    ws.send("ping");
+                }
+            }, 30000);
         };
 
         ws.onmessage = (evt) => {
@@ -26,17 +42,22 @@ const DeviceClient = (() => {
                 const msg = JSON.parse(evt.data);
                 listeners.forEach((fn) => fn(msg.event, msg.data));
             } catch (e) {
-                console.error("[ws] parse error:", e);
+                // ignore non-JSON (pong responses etc.)
             }
         };
 
         ws.onclose = () => {
-            console.log("[ws] disconnected, reconnecting in 2s...");
-            reconnectTimer = setTimeout(connect, 2000);
+            clearTimeout(connectTimeout);
+            if (pingInterval) {
+                clearInterval(pingInterval);
+                pingInterval = null;
+            }
+            // Exponential backoff: 2s, 4s, 8s, 16s max
+            reconnectTimer = setTimeout(connect, reconnectDelay);
+            reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
         };
 
-        ws.onerror = (err) => {
-            console.error("[ws] error:", err);
+        ws.onerror = () => {
             ws.close();
         };
     }

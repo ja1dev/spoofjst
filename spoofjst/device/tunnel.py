@@ -11,8 +11,18 @@ import asyncio
 import json
 import logging
 import re
+import shutil
 
 logger = logging.getLogger(__name__)
+
+
+def _find_pymobiledevice3() -> str:
+    """Find the pymobiledevice3 executable path."""
+    path = shutil.which("pymobiledevice3")
+    if path:
+        return path
+    # Fallback to running as python module
+    return None
 
 
 class TunnelManager:
@@ -28,74 +38,65 @@ class TunnelManager:
     async def start(self, udid: str) -> bool:
         """Start a lockdown tunnel for the given device.
 
-        Launches `pymobiledevice3 remote start-tunnel` as a subprocess
-        and parses its output for the RSD address and port.
+        Tries `remote start-tunnel` first, then falls back to
+        `lockdown start-tunnel` (faster, available on iOS 17.4+).
         """
         await self.stop()
         self.status = "connecting"
 
-        try:
-            # Try the lockdown start-tunnel first (works for iOS 17.4+)
-            self._process = await asyncio.create_subprocess_exec(
-                "python3", "-m", "pymobiledevice3",
-                "remote", "start-tunnel",
-                "--udid", udid,
-                "--script-mode",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
+        pmd3 = _find_pymobiledevice3()
 
-            # Read output to find the RSD address/port
-            # pymobiledevice3 outputs JSON like: {"tunnel-address": "...", "tunnel-port": ...}
-            success = await self._parse_tunnel_output()
-            if success:
-                self.status = "connected"
-                logger.info("Tunnel established: %s:%d", self._rsd_address, self._rsd_port)
-                return True
+        # Build command variants to try
+        commands = []
+        if pmd3:
+            commands.append([pmd3, "remote", "start-tunnel", "--udid", udid, "--script-mode"])
+            commands.append([pmd3, "lockdown", "start-tunnel", "--udid", udid, "--script-mode"])
+        else:
+            import sys
+            py = sys.executable
+            commands.append([py, "-m", "pymobiledevice3", "remote", "start-tunnel", "--udid", udid, "--script-mode"])
+            commands.append([py, "-m", "pymobiledevice3", "lockdown", "start-tunnel", "--udid", udid, "--script-mode"])
 
-            # If that failed, try the alternative tunnel command
-            await self._kill_process()
-            self._process = await asyncio.create_subprocess_exec(
-                "python3", "-m", "pymobiledevice3",
-                "lockdown", "start-tunnel",
-                "--udid", udid,
-                "--script-mode",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
+        for cmd in commands:
+            try:
+                logger.info("Trying tunnel: %s", " ".join(cmd))
+                self._process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
 
-            success = await self._parse_tunnel_output()
-            if success:
-                self.status = "connected"
-                logger.info("Tunnel established (lockdown): %s:%d", self._rsd_address, self._rsd_port)
-                return True
+                success = await self._parse_tunnel_output()
+                if success:
+                    self.status = "connected"
+                    logger.info("Tunnel established: %s:%d", self._rsd_address, self._rsd_port)
+                    return True
 
-            self.status = "error"
-            return False
+                await self._kill_process()
 
-        except Exception:
-            logger.exception("Failed to start tunnel")
-            self.status = "error"
-            return False
+            except Exception:
+                logger.exception("Tunnel command failed: %s", " ".join(cmd))
+                await self._kill_process()
+
+        self.status = "error"
+        return False
 
     async def _parse_tunnel_output(self) -> bool:
         """Parse tunnel subprocess output for RSD address and port.
 
-        Returns True if successfully parsed, False on timeout or failure.
+        --script-mode outputs: HOST PORT (space-separated on one line)
+        Normal mode outputs: RSD Address: <addr> / RSD Port: <port>
         """
         if not self._process or not self._process.stdout:
             return False
 
         try:
-            # Wait up to 30 seconds for the tunnel to establish
-            output = b""
-            for _ in range(60):  # 60 * 0.5s = 30s
+            for _ in range(60):  # 60 * 0.5s = 30s timeout
                 try:
                     chunk = await asyncio.wait_for(
                         self._process.stdout.readline(), timeout=0.5
                     )
                 except asyncio.TimeoutError:
-                    # Check if process died
                     if self._process.returncode is not None:
                         if self._process.stderr:
                             err = await self._process.stderr.read()
@@ -106,27 +107,34 @@ class TunnelManager:
                 if not chunk:
                     break
 
-                output += chunk
                 line = chunk.decode(errors="replace").strip()
+                if not line:
+                    continue
+
                 logger.debug("Tunnel output: %s", line)
 
-                # Try to parse JSON output from --script-mode
-                try:
-                    data = json.loads(line)
-                    addr = data.get("tunnel-address") or data.get("address")
-                    port = data.get("tunnel-port") or data.get("port")
-                    if addr and port:
-                        self._rsd_address = str(addr)
-                        self._rsd_port = int(port)
+                # --script-mode: single line "HOST PORT"
+                parts = line.split()
+                if len(parts) == 2:
+                    try:
+                        port = int(parts[1])
+                        self._rsd_address = parts[0]
+                        self._rsd_port = port
                         return True
-                except (json.JSONDecodeError, ValueError):
-                    pass
+                    except ValueError:
+                        pass
 
-                # Fallback: parse plain text output like "address: fd00::1 port: 12345"
-                match = re.search(r"(?:address|addr)[:\s]+(\S+).*?(?:port)[:\s]+(\d+)", line, re.IGNORECASE)
-                if match:
-                    self._rsd_address = match.group(1)
-                    self._rsd_port = int(match.group(2))
+                # Normal mode: "RSD Address: fd00::1"
+                addr_match = re.search(r"RSD Address:\s*(\S+)", line)
+                if addr_match:
+                    self._rsd_address = addr_match.group(1)
+
+                port_match = re.search(r"RSD Port:\s*(\d+)", line)
+                if port_match:
+                    self._rsd_port = int(port_match.group(1))
+
+                # If we have both from normal mode lines
+                if self._rsd_address and self._rsd_port:
                     return True
 
             return False

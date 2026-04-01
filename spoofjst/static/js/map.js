@@ -14,16 +14,18 @@ const SpoofMap = (() => {
             center: [37.7749, -122.4194], // San Francisco default
             zoom: 13,
             zoomControl: false,
+            tap: true, // explicit mobile tap support
         });
 
         // Tile layer (OpenStreetMap)
         L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-            attribution: '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>',
+            attribution: '&copy; <a href="https://openstreetmap.org/copyright">OSM</a>',
             maxZoom: 19,
         }).addTo(map);
 
-        // Zoom controls — top right
-        L.control.zoom({ position: "topright" }).addTo(map);
+        // Zoom controls — bottom right on mobile, top right on desktop
+        const isMobile = window.innerWidth <= 480;
+        L.control.zoom({ position: isMobile ? "bottomright" : "topright" }).addTo(map);
 
         // Click handler
         map.on("click", (e) => {
@@ -52,7 +54,7 @@ const SpoofMap = (() => {
         }
 
         marker.bindPopup(
-            `<b>Spoofed Location</b><br>${lat.toFixed(6)}, ${lng.toFixed(6)}`
+            `<b>Spoofed</b><br>${lat.toFixed(6)}, ${lng.toFixed(6)}`
         ).openPopup();
     }
 
@@ -68,10 +70,11 @@ const SpoofMap = (() => {
     }
 
     async function searchPlace(query) {
-        // Nominatim geocoding (OpenStreetMap, no API key)
         const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`;
         try {
-            const resp = await fetch(url);
+            const resp = await fetch(url, {
+                headers: { "User-Agent": "spoofjst/0.1.0" },
+            });
             const results = await resp.json();
             if (results.length > 0) {
                 const { lat, lon } = results[0];

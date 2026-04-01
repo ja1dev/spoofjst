@@ -52,7 +52,6 @@ class DeviceManager:
         self._listeners.append(callback)
 
     def remove_listener(self, callback: Callable) -> None:
-        self._listeners.discard(callback) if hasattr(self._listeners, "discard") else None
         if callback in self._listeners:
             self._listeners.remove(callback)
 
@@ -105,7 +104,7 @@ class DeviceManager:
         try:
             self.lockdown = await asyncio.to_thread(create_using_usbmux, serial=udid)
 
-            all_values = await asyncio.to_thread(self.lockdown.all_values.copy)
+            all_values = await asyncio.to_thread(lambda: dict(self.lockdown.all_values))
             name = all_values.get("DeviceName", "Unknown")
             model = all_values.get("ProductType", "Unknown")
             ios_version = all_values.get("ProductVersion", "0.0")
@@ -114,7 +113,7 @@ class DeviceManager:
             dev_mode = True
             try:
                 dev_mode = await asyncio.to_thread(
-                    lambda: self.lockdown.get_value("com.apple.security.mac.amfi", "DeveloperModeStatus")
+                    lambda: self.lockdown.get_value(domain="com.apple.security.mac.amfi", key="DeveloperModeStatus")
                 )
                 if dev_mode is None:
                     dev_mode = True  # Pre-iOS 16 doesn't have this
