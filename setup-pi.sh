@@ -37,7 +37,7 @@ info "This will configure your Pi Zero as a portable iPhone GPS spoofer."
 echo ""
 
 # -------------------------------------------------------
-# 1. System packages
+# 1. System packages (needs internet)
 # -------------------------------------------------------
 info "Updating package lists..."
 apt-get update -qq
@@ -49,7 +49,17 @@ apt-get install -y -qq \
     git
 
 # -------------------------------------------------------
-# 2. USB OTG Host Mode
+# 2. Install spoofjst Python package (needs internet — do before hotspot)
+# -------------------------------------------------------
+info "Creating Python virtual environment..."
+python3 -m venv "${SPOOFJST_DIR}/.venv"
+
+info "Installing spoofjst and dependencies (this may take 5-15 minutes on Pi Zero)..."
+"${SPOOFJST_DIR}/.venv/bin/pip" install --no-cache-dir --upgrade pip
+"${SPOOFJST_DIR}/.venv/bin/pip" install --no-cache-dir -e "${SPOOFJST_DIR}"
+
+# -------------------------------------------------------
+# 3. USB OTG Host Mode
 # -------------------------------------------------------
 info "Configuring USB OTG host mode..."
 
@@ -67,7 +77,7 @@ else
 fi
 
 # -------------------------------------------------------
-# 3. WiFi Hotspot (so you can control spoofjst from iPhone browser)
+# 4. WiFi Hotspot — configured but NOT activated until reboot
 # -------------------------------------------------------
 info "Setting up WiFi hotspot (SSID: ${HOTSPOT_SSID}, Pass: ${HOTSPOT_PASS})..."
 
@@ -75,13 +85,13 @@ info "Setting up WiFi hotspot (SSID: ${HOTSPOT_SSID}, Pass: ${HOTSPOT_PASS})..."
 if command -v nmcli &>/dev/null; then
     info "Detected NetworkManager — configuring hotspot via nmcli..."
 
-    # Remove any existing WiFi client connections so they don't compete
-    nmcli connection delete preconfigured 2>/dev/null || true
-
     # Delete any existing spoofjst connection
     nmcli connection delete spoofjst 2>/dev/null || true
 
-    # Create hotspot connection
+    # Remove the preconfigured WiFi client so it doesn't compete on reboot
+    nmcli connection delete preconfigured 2>/dev/null || true
+
+    # Create hotspot connection (autoconnect on boot)
     nmcli connection add \
         type wifi \
         ifname wlan0 \
@@ -96,19 +106,18 @@ if command -v nmcli &>/dev/null; then
         wifi-sec.key-mgmt wpa-psk \
         wifi-sec.psk "${HOTSPOT_PASS}"
 
-    # Make sure it auto-starts with high priority
     nmcli connection modify spoofjst connection.autoconnect yes
     nmcli connection modify spoofjst connection.autoconnect-priority 100
 
-    # Bring it up now
-    nmcli connection up spoofjst || warn "Could not bring up hotspot now (will work after reboot)"
+    # Do NOT bring it up now — that kills the current WiFi/SSH connection.
+    # It will activate automatically on reboot.
+    info "Hotspot configured. Will activate after reboot."
 
 else
     info "Using legacy networking — configuring hotspot via hostapd..."
 
     apt-get install -y -qq dnsmasq hostapd
 
-    # hostapd config
     cat > /etc/hostapd/hostapd.conf << EOF
 interface=wlan0
 driver=nl80211
@@ -166,16 +175,6 @@ EOF
 fi
 
 # -------------------------------------------------------
-# 4. Install spoofjst Python package
-# -------------------------------------------------------
-info "Creating Python virtual environment..."
-python3 -m venv "${SPOOFJST_DIR}/.venv"
-
-info "Installing spoofjst and dependencies (this may take a few minutes on Pi Zero)..."
-"${SPOOFJST_DIR}/.venv/bin/pip" install --no-cache-dir --upgrade pip
-"${SPOOFJST_DIR}/.venv/bin/pip" install --no-cache-dir -e "${SPOOFJST_DIR}"
-
-# -------------------------------------------------------
 # 5. Systemd service (auto-start on boot)
 # -------------------------------------------------------
 info "Installing systemd service..."
@@ -217,7 +216,7 @@ info "WiFi Hotspot SSID:  ${HOTSPOT_SSID}"
 info "WiFi Password:      ${HOTSPOT_PASS}"
 info "Web UI URL:         http://192.168.4.1"
 echo ""
-warn "REBOOT NOW to apply USB host mode and start services:"
+warn "REBOOT NOW to apply all changes:"
 echo "    sudo reboot"
 echo ""
 info "After reboot:"
