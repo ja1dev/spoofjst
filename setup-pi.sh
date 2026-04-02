@@ -3,7 +3,7 @@
 # spoofjst Pi Zero Setup Script
 #
 # Configures a Raspberry Pi Zero 2W as a portable iPhone location spoofer.
-# Run this ONCE after flashing Raspberry Pi OS Lite onto your SD card.
+# Run this ONCE after flashing Raspberry Pi OS onto your SD card.
 #
 # Usage:
 #   sudo bash setup-pi.sh
@@ -46,7 +46,6 @@ info "Installing system dependencies..."
 apt-get install -y -qq \
     python3 python3-pip python3-venv \
     usbmuxd libimobiledevice-utils \
-    dnsmasq hostapd \
     git
 
 # -------------------------------------------------------
@@ -72,8 +71,45 @@ fi
 # -------------------------------------------------------
 info "Setting up WiFi hotspot (SSID: ${HOTSPOT_SSID}, Pass: ${HOTSPOT_PASS})..."
 
-# hostapd config
-cat > /etc/hostapd/hostapd.conf << EOF
+# Detect if using NetworkManager (Bookworm/Trixie) or older dhcpcd
+if command -v nmcli &>/dev/null; then
+    info "Detected NetworkManager — configuring hotspot via nmcli..."
+
+    # Remove any existing WiFi client connections so they don't compete
+    nmcli connection delete preconfigured 2>/dev/null || true
+
+    # Delete any existing spoofjst connection
+    nmcli connection delete spoofjst 2>/dev/null || true
+
+    # Create hotspot connection
+    nmcli connection add \
+        type wifi \
+        ifname wlan0 \
+        con-name spoofjst \
+        autoconnect yes \
+        ssid "${HOTSPOT_SSID}" \
+        wifi.mode ap \
+        wifi.band bg \
+        wifi.channel 7 \
+        ipv4.method shared \
+        ipv4.addresses 192.168.4.1/24 \
+        wifi-sec.key-mgmt wpa-psk \
+        wifi-sec.psk "${HOTSPOT_PASS}"
+
+    # Make sure it auto-starts with high priority
+    nmcli connection modify spoofjst connection.autoconnect yes
+    nmcli connection modify spoofjst connection.autoconnect-priority 100
+
+    # Bring it up now
+    nmcli connection up spoofjst || warn "Could not bring up hotspot now (will work after reboot)"
+
+else
+    info "Using legacy networking — configuring hotspot via hostapd..."
+
+    apt-get install -y -qq dnsmasq hostapd
+
+    # hostapd config
+    cat > /etc/hostapd/hostapd.conf << EOF
 interface=wlan0
 driver=nl80211
 ssid=${HOTSPOT_SSID}
@@ -90,50 +126,44 @@ wpa_pairwise=TKIP
 rsn_pairwise=CCMP
 EOF
 
-# Point hostapd to our config
-if [[ -f /etc/default/hostapd ]]; then
-    sed -i 's|^#DAEMON_CONF=.*|DAEMON_CONF="/etc/hostapd/hostapd.conf"|' /etc/default/hostapd
-fi
+    if [[ -f /etc/default/hostapd ]]; then
+        sed -i 's|^#DAEMON_CONF=.*|DAEMON_CONF="/etc/hostapd/hostapd.conf"|' /etc/default/hostapd
+    fi
 
-# dnsmasq config — DHCP server for hotspot clients
-cat > /etc/dnsmasq.d/spoofjst.conf << EOF
+    cat > /etc/dnsmasq.d/spoofjst.conf << EOF
 interface=wlan0
 dhcp-range=192.168.4.2,192.168.4.20,255.255.255.0,24h
 domain=local
 address=/spoof.local/192.168.4.1
 EOF
 
-# Static IP for wlan0
-if [[ -d /etc/network/interfaces.d ]]; then
-    cat > /etc/network/interfaces.d/wlan0 << EOF
+    if [[ -d /etc/network/interfaces.d ]]; then
+        cat > /etc/network/interfaces.d/wlan0 << EOF
 auto wlan0
 iface wlan0 inet static
     address 192.168.4.1
     netmask 255.255.255.0
     nohook wpa_supplicant
 EOF
-fi
+    fi
 
-# Also configure via dhcpcd (used on some Pi OS versions)
-if [[ -f /etc/dhcpcd.conf ]]; then
-    if ! grep -q "interface wlan0" /etc/dhcpcd.conf 2>/dev/null; then
-        cat >> /etc/dhcpcd.conf << EOF
+    if [[ -f /etc/dhcpcd.conf ]]; then
+        if ! grep -q "interface wlan0" /etc/dhcpcd.conf 2>/dev/null; then
+            cat >> /etc/dhcpcd.conf << EOF
 
 # spoofjst hotspot
 interface wlan0
     static ip_address=192.168.4.1/24
     nohook wpa_supplicant
 EOF
+        fi
     fi
+
+    systemctl disable wpa_supplicant 2>/dev/null || true
+    systemctl unmask hostapd 2>/dev/null || true
+    systemctl enable hostapd
+    systemctl enable dnsmasq
 fi
-
-# Disable wpa_supplicant for wlan0 (we're running AP mode, not client)
-systemctl disable wpa_supplicant 2>/dev/null || true
-
-# Enable services
-systemctl unmask hostapd 2>/dev/null || true
-systemctl enable hostapd
-systemctl enable dnsmasq
 
 # -------------------------------------------------------
 # 4. Install spoofjst Python package
@@ -142,8 +172,8 @@ info "Creating Python virtual environment..."
 python3 -m venv "${SPOOFJST_DIR}/.venv"
 
 info "Installing spoofjst and dependencies (this may take a few minutes on Pi Zero)..."
-"${SPOOFJST_DIR}/.venv/bin/pip" install --upgrade pip
-"${SPOOFJST_DIR}/.venv/bin/pip" install -e "${SPOOFJST_DIR}"
+"${SPOOFJST_DIR}/.venv/bin/pip" install --no-cache-dir --upgrade pip
+"${SPOOFJST_DIR}/.venv/bin/pip" install --no-cache-dir -e "${SPOOFJST_DIR}"
 
 # -------------------------------------------------------
 # 5. Systemd service (auto-start on boot)
@@ -152,8 +182,8 @@ info "Installing systemd service..."
 cat > /etc/systemd/system/spoofjst.service << EOF
 [Unit]
 Description=spoofjst - iPhone GPS Location Spoofer
-After=network.target usbmuxd.service hostapd.service dnsmasq.service
-Wants=usbmuxd.service hostapd.service dnsmasq.service
+After=network.target usbmuxd.service
+Wants=usbmuxd.service
 
 [Service]
 Type=simple
@@ -186,7 +216,6 @@ echo ""
 info "WiFi Hotspot SSID:  ${HOTSPOT_SSID}"
 info "WiFi Password:      ${HOTSPOT_PASS}"
 info "Web UI URL:         http://192.168.4.1"
-info "Also available at:  http://spoof.local"
 echo ""
 warn "REBOOT NOW to apply USB host mode and start services:"
 echo "    sudo reboot"
