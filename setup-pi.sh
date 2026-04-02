@@ -45,7 +45,7 @@ apt-get update -qq
 info "Installing system dependencies..."
 apt-get install -y -qq \
     python3 python3-pip python3-venv \
-    usbmuxd libimobiledevice6 libimobiledevice-utils \
+    usbmuxd libimobiledevice-utils \
     dnsmasq hostapd \
     git
 
