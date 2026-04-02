@@ -104,13 +104,15 @@ address=/spoof.local/192.168.4.1
 EOF
 
 # Static IP for wlan0
-cat > /etc/network/interfaces.d/wlan0 << EOF
+if [[ -d /etc/network/interfaces.d ]]; then
+    cat > /etc/network/interfaces.d/wlan0 << EOF
 auto wlan0
 iface wlan0 inet static
     address 192.168.4.1
     netmask 255.255.255.0
     nohook wpa_supplicant
 EOF
+fi
 
 # Also configure via dhcpcd (used on some Pi OS versions)
 if [[ -f /etc/dhcpcd.conf ]]; then
