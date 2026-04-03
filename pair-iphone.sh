@@ -3,7 +3,7 @@
 # spoofjst iPhone Pairing Helper
 #
 # Run this ONCE after first connecting your iPhone to the Pi Zero.
-# It handles the trust pairing and verifies the connection works.
+# It handles the trust pairing and Developer Mode setup (no Xcode needed).
 #
 # Usage:
 #   sudo bash pair-iphone.sh
@@ -21,6 +21,9 @@ warn()  { echo -e "${YELLOW}[!]${NC} $1"; }
 error() { echo -e "${RED}[x]${NC} $1"; }
 
 [[ $EUID -ne 0 ]] && { error "Run with sudo: sudo bash pair-iphone.sh"; exit 1; }
+
+SPOOFJST_DIR="$(cd "$(dirname "$0")" && pwd)"
+PMD3="${SPOOFJST_DIR}/.venv/bin/pymobiledevice3"
 
 echo ""
 echo "============================================"
@@ -89,19 +92,26 @@ echo ""
 MAJOR_VERSION=$(echo "$IOS_VERSION" | cut -d. -f1)
 if [[ "$MAJOR_VERSION" -ge 16 ]]; then
     info "Checking Developer Mode..."
-    # Try to check developer mode status
     DEV_MODE=$(idevicedevmodectl status 2>/dev/null || echo "unknown")
     if echo "$DEV_MODE" | grep -qi "enabled"; then
         info "Developer Mode: ENABLED"
     else
-        warn "Developer Mode may not be enabled."
+        warn "Developer Mode is not enabled."
         echo ""
-        echo "To enable Developer Mode on your iPhone:"
-        echo "  1. Go to Settings > Privacy & Security"
-        echo "  2. Scroll down and tap 'Developer Mode'"
-        echo "  3. Toggle it ON and restart your iPhone"
-        echo "  4. After restart, confirm when prompted"
+        info "Revealing Developer Mode toggle on your iPhone (no Xcode needed)..."
+        if [[ -f "$PMD3" ]]; then
+            "$PMD3" amfi reveal-developer-mode 2>/dev/null || true
+            echo ""
+            info "Developer Mode toggle should now be visible on your iPhone."
+        fi
         echo ""
+        echo "  To enable Developer Mode:"
+        echo "    1. On iPhone: Settings > Privacy & Security > Developer Mode"
+        echo "    2. Toggle it ON"
+        echo "    3. iPhone will restart"
+        echo "    4. After restart, tap 'Turn On' when prompted"
+        echo ""
+        warn "After enabling Developer Mode, run this script again to verify."
     fi
 fi
 

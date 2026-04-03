@@ -39,3 +39,17 @@ async def clear_location(request: Request):
         await manager._notify("location_cleared", {})
 
     return result
+
+
+@router.post("/developer-mode/reveal")
+async def reveal_developer_mode(request: Request):
+    """Reveal Developer Mode toggle in iPhone Settings."""
+    manager = request.app.state.device_manager
+    return await manager.reveal_developer_mode()
+
+
+@router.post("/developer-mode/recheck")
+async def recheck_developer_mode(request: Request):
+    """Re-check if Developer Mode has been enabled."""
+    manager = request.app.state.device_manager
+    return await manager.recheck_developer_mode()

@@ -25,26 +25,28 @@ Do this first — takes 2 minutes and confirms spoofing works before touching th
 git clone https://github.com/ja1dev/spoofjst.git
 cd spoofjst
 
-# Install
-pip3 install -e .
+# Create venv and install
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
 ```
 
 **Prepare your iPhone:**
 
 1. Plug iPhone into Mac via USB
 2. Unlock it and tap **Trust This Computer** if prompted
-3. Enable Developer Mode (one-time):
+3. Enable Developer Mode (no Xcode needed):
    ```bash
-   sudo pymobiledevice3 amfi enable-developer-mode
+   sudo .venv/bin/pymobiledevice3 amfi reveal-developer-mode
    ```
-   - iPhone will reboot
-   - After reboot, tap **Turn On** when prompted to confirm Developer Mode
-   - Note: You can also enable it via Settings → Privacy & Security → Developer Mode, but that toggle only appears after connecting to Xcode
+   - On iPhone: go to **Settings → Privacy & Security → Developer Mode**
+   - Toggle it **ON**
+   - iPhone will restart — tap **Turn On** when prompted after reboot
 
 **Run it:**
 
 ```bash
-sudo python3 -m spoofjst
+sudo .venv/bin/python3 -m spoofjst
 ```
 
 Browser opens automatically. Click the map. Your iPhone location should jump to that spot. If it works, you're good — move on to Pi setup.
@@ -54,9 +56,9 @@ Browser opens automatically. Click the map. Your iPhone location should jump to 
 1. Download [Raspberry Pi Imager](https://www.raspberrypi.com/software/) on your Mac
 2. Insert your microSD card into your Mac
 3. In Imager, choose:
-   - **OS:** Raspberry Pi OS Lite (32-bit)
+   - **OS:** Raspberry Pi OS Lite (64-bit) — under "Raspberry Pi OS (other)"
    - **Storage:** your microSD card
-4. Click the **gear icon** (⚙) before writing and set:
+4. Click the **gear icon** before writing and set:
    - **Enable SSH:** Yes
    - **Username:** `pi`
    - **Password:** pick something (e.g. `spoof1234`)
@@ -98,38 +100,24 @@ sudo reboot
 ```
 
 The setup script installs everything automatically:
+- Creates 512MB swap file (prevents out-of-memory during install)
 - USB OTG host mode
 - WiFi hotspot (SSID: `spoofjst`, password: `spoof1234`)
 - usbmuxd for iPhone communication
-- Python dependencies
+- Python dependencies (takes 10-20 minutes on Pi Zero — be patient)
 - Auto-start on boot via systemd
 
 The Pi will reboot. After this you **no longer need your home WiFi** — the Pi runs its own hotspot.
 
-## Step 5: Enable Developer Mode (First Time Only)
-
-After the Pi reboots, SSH back in over your home WiFi (before the hotspot takes over):
-
-```bash
-ssh pi@raspberrypi.local
-```
-
-Plug your iPhone into the Pi's **right port** (DATA) via OTG adapter. Unlock iPhone and tap **Trust This Computer**, then:
-
-```bash
-sudo /home/pi/spoofjst/.venv/bin/pymobiledevice3 amfi enable-developer-mode
-```
-
-iPhone will reboot. Tap **Turn On** when prompted. This is a one-time step — you never need to do it again.
-
-## Step 6: Use It
+## Step 5: Use It
 
 1. Plug power bank into Pi's **left port** (PWR)
 2. Plug iPhone into Pi's **right port** (DATA) using the USB-C OTG adapter + cable
 3. Unlock iPhone, tap **Trust This Computer** (first time only)
 4. On iPhone, go to **Settings → WiFi → join `spoofjst`** (password: `spoof1234`)
 5. Open Safari → `http://192.168.4.1`
-6. Tap the map to spoof your location
+6. If Developer Mode is needed, the web UI will show a button to reveal the toggle — no Xcode required
+7. Tap the map to spoof your location
 
 ## Daily Use (After First-Time Setup)
 
@@ -161,7 +149,7 @@ Everything starts automatically on boot. No SSH needed.
 - Make sure you ran `sudo bash setup-pi.sh` and rebooted
 
 **Location not changing:**
-- Verify Developer Mode is enabled on iPhone
+- Verify Developer Mode is enabled on iPhone (the web UI will tell you)
 - Check the web UI shows "Connected" status
 - Try clearing location first, then setting a new one
 
@@ -169,6 +157,11 @@ Everything starts automatically on boot. No SSH needed.
 - Confirm you're connected to the `spoofjst` WiFi
 - Try `http://192.168.4.1` (not https)
 - SSH in and check: `sudo systemctl status spoofjst`
+
+**pip install fails / OOM killed:**
+- Check swap is active: `free -h` (should show 512M swap)
+- If not: `sudo swapon /var/swap.spoofjst`
+- Re-run: `sudo .venv/bin/pip install --no-cache-dir -e .`
 
 **iPhone stops responding after being locked for a while:**
 - iOS USB Restricted Mode blocks USB data after 1 hour locked

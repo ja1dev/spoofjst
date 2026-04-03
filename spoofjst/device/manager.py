@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -139,8 +140,10 @@ class DeviceManager:
 
             await self._notify("device_connected", self.device_info.to_dict())
 
+            gc.collect()
+
             if not self.device_info.developer_mode:
-                await self._notify("tunnel_status", {"status": "error", "message": "Developer Mode is not enabled. Enable it in Settings > Privacy & Security > Developer Mode."})
+                await self._notify("developer_mode_needed", self.device_info.to_dict())
                 return
 
             # Start tunnel for iOS 17+
@@ -169,6 +172,52 @@ class DeviceManager:
         await self.tunnel.stop()
         self.lockdown = None
         self.device_info = None
+
+    async def reveal_developer_mode(self) -> dict[str, Any]:
+        """Reveal the Developer Mode toggle in Settings (no Xcode needed)."""
+        if self.lockdown is None:
+            return {"success": False, "error": "No device connected"}
+        try:
+            from pymobiledevice3.services.amfi import AmfiService
+            amfi = AmfiService(self.lockdown)
+            await amfi.reveal_developer_mode_option_in_ui()
+            return {"success": True}
+        except Exception as e:
+            logger.exception("Failed to reveal Developer Mode")
+            return {"success": False, "error": str(e)}
+
+    async def recheck_developer_mode(self) -> dict[str, Any]:
+        """Re-check Developer Mode status and continue connection if enabled."""
+        if self.device_info is None or self.lockdown is None:
+            return {"success": False, "error": "No device connected"}
+        try:
+            val = await self.lockdown.get_value(
+                domain="com.apple.security.mac.amfi", key="DeveloperModeStatus"
+            )
+            dev_mode = bool(val) if val is not None else False
+            self.device_info.developer_mode = dev_mode
+
+            if dev_mode:
+                # Developer Mode now enabled — continue with tunnel setup
+                ios_version = self.device_info.ios_version
+                major = int(ios_version.split(".")[0])
+                if major >= 17:
+                    await self._notify("tunnel_status", {"status": "connecting"})
+                    success = await self.tunnel.start(self.device_info.udid)
+                    if success:
+                        await self._notify("tunnel_status", {"status": "connected"})
+                        self.location.set_service_provider(await self.tunnel.get_service_provider())
+                    else:
+                        await self._notify("tunnel_status", {"status": "error", "message": "Failed to establish tunnel"})
+                else:
+                    self.location.set_service_provider(self.lockdown)
+                    await self._notify("tunnel_status", {"status": "connected"})
+                return {"success": True, "developer_mode": True}
+            else:
+                return {"success": True, "developer_mode": False}
+        except Exception as e:
+            logger.exception("Failed to recheck Developer Mode")
+            return {"success": False, "error": str(e)}
 
     def get_status(self) -> dict[str, Any]:
         """Return current device + tunnel + location status."""

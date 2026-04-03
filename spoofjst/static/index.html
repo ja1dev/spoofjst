@@ -30,6 +30,19 @@
                 <div class="info-row"><span class="label">iOS:</span> <span id="device-ios">—</span></div>
                 <div class="info-row"><span class="label">Tunnel:</span> <span id="tunnel-status">—</span></div>
             </div>
+            <div id="devmode-banner" class="hidden">
+                <div class="devmode-title">Developer Mode Required</div>
+                <ol class="devmode-steps">
+                    <li>Tap the button below to reveal the toggle</li>
+                    <li>On iPhone: Settings &rarr; Privacy &amp; Security &rarr; Developer Mode</li>
+                    <li>Toggle it ON, then restart your iPhone</li>
+                    <li>After restart, tap "Turn On" when prompted</li>
+                </ol>
+                <div class="button-row">
+                    <button id="btn-reveal-devmode" class="btn btn-primary">Reveal Developer Mode</button>
+                    <button id="btn-recheck-devmode" class="btn btn-small">Check Again</button>
+                </div>
+            </div>
         </div>
 
         <!-- Location Controls -->

@@ -37,7 +37,26 @@ info "This will configure your Pi Zero as a portable iPhone GPS spoofer."
 echo ""
 
 # -------------------------------------------------------
-# 1. System packages (needs internet)
+# 1. Swap file (Pi Zero 2W only has 512MB RAM — pip needs more)
+# -------------------------------------------------------
+SWAPFILE="/var/swap.spoofjst"
+if swapon --show | grep -q "$SWAPFILE"; then
+    info "Swap already active."
+else
+    info "Creating 512MB swap file (needed for pip install)..."
+    dd if=/dev/zero of="$SWAPFILE" bs=1M count=512 status=progress
+    chmod 600 "$SWAPFILE"
+    mkswap "$SWAPFILE"
+    swapon "$SWAPFILE"
+    # Persist across reboots
+    if ! grep -q "$SWAPFILE" /etc/fstab 2>/dev/null; then
+        echo "$SWAPFILE none swap sw 0 0" >> /etc/fstab
+    fi
+    info "Swap enabled (512MB)."
+fi
+
+# -------------------------------------------------------
+# 2. System packages (needs internet)
 # -------------------------------------------------------
 info "Updating package lists..."
 apt-get update -qq
@@ -47,16 +66,6 @@ apt-get install -y -qq \
     python3 python3-pip python3-venv \
     usbmuxd libimobiledevice-utils \
     git
-
-# -------------------------------------------------------
-# 2. Install spoofjst Python package (needs internet — do before hotspot)
-# -------------------------------------------------------
-info "Creating Python virtual environment..."
-python3 -m venv "${SPOOFJST_DIR}/.venv"
-
-info "Installing spoofjst and dependencies (this may take 5-15 minutes on Pi Zero)..."
-"${SPOOFJST_DIR}/.venv/bin/pip" install --no-cache-dir --upgrade pip
-"${SPOOFJST_DIR}/.venv/bin/pip" install --no-cache-dir -e "${SPOOFJST_DIR}"
 
 # -------------------------------------------------------
 # 3. USB OTG Host Mode
@@ -77,11 +86,31 @@ else
 fi
 
 # -------------------------------------------------------
-# 4. WiFi Hotspot — configured but NOT activated until reboot
+# 4. Install spoofjst Python package (needs internet — do before hotspot)
+# -------------------------------------------------------
+if [[ -f "${SPOOFJST_DIR}/.venv/bin/python" ]]; then
+    info "Virtual environment already exists."
+else
+    info "Creating Python virtual environment..."
+    python3 -m venv "${SPOOFJST_DIR}/.venv"
+fi
+
+info "Installing spoofjst and dependencies (10-20 minutes on Pi Zero)..."
+PYTHONDONTWRITEBYTECODE=1 "${SPOOFJST_DIR}/.venv/bin/pip" install --no-cache-dir --upgrade pip setuptools wheel
+PYTHONDONTWRITEBYTECODE=1 "${SPOOFJST_DIR}/.venv/bin/pip" install --no-cache-dir -e "${SPOOFJST_DIR}"
+
+# Verify the install actually worked
+info "Verifying installation..."
+if ! "${SPOOFJST_DIR}/.venv/bin/python" -c "from spoofjst.app import create_app; from pymobiledevice3.lockdown import LockdownClient; print('OK')" 2>/dev/null; then
+    error "Installation verification failed. Try running: sudo ${SPOOFJST_DIR}/.venv/bin/pip install --no-cache-dir -e ${SPOOFJST_DIR}"
+fi
+info "Installation verified."
+
+# -------------------------------------------------------
+# 5. WiFi Hotspot — configured but NOT activated until reboot
 # -------------------------------------------------------
 info "Setting up WiFi hotspot (SSID: ${HOTSPOT_SSID}, Pass: ${HOTSPOT_PASS})..."
 
-# Detect if using NetworkManager (Bookworm/Trixie) or older dhcpcd
 if command -v nmcli &>/dev/null; then
     info "Detected NetworkManager — configuring hotspot via nmcli..."
 
@@ -109,8 +138,6 @@ if command -v nmcli &>/dev/null; then
     nmcli connection modify spoofjst connection.autoconnect yes
     nmcli connection modify spoofjst connection.autoconnect-priority 100
 
-    # Do NOT bring it up now — that kills the current WiFi/SSH connection.
-    # It will activate automatically on reboot.
     info "Hotspot configured. Will activate after reboot."
 
 else
@@ -175,7 +202,7 @@ EOF
 fi
 
 # -------------------------------------------------------
-# 5. Systemd service (auto-start on boot)
+# 6. Systemd service (auto-start on boot)
 # -------------------------------------------------------
 info "Installing systemd service..."
 cat > /etc/systemd/system/spoofjst.service << EOF
@@ -191,6 +218,7 @@ WorkingDirectory=${SPOOFJST_DIR}
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
 
 [Install]
 WantedBy=multi-user.target
@@ -200,7 +228,7 @@ systemctl daemon-reload
 systemctl enable spoofjst.service
 
 # -------------------------------------------------------
-# 6. usbmuxd auto-start
+# 7. usbmuxd auto-start
 # -------------------------------------------------------
 systemctl enable usbmuxd
 
@@ -220,9 +248,8 @@ warn "REBOOT NOW to apply all changes:"
 echo "    sudo reboot"
 echo ""
 info "After reboot:"
-echo "    1. Connect iPhone to Pi Zero via USB (OTG adapter + cable)"
-echo "    2. Tap 'Trust This Computer' on iPhone (first time only)"
-echo "    3. On iPhone, join WiFi network '${HOTSPOT_SSID}' (password: ${HOTSPOT_PASS})"
-echo "    4. Open Safari and go to http://192.168.4.1"
-echo "    5. Click the map to spoof your location!"
+echo "    1. Connect iPhone to Pi via USB (OTG adapter + cable)"
+echo "    2. On iPhone, join WiFi '${HOTSPOT_SSID}' (password: ${HOTSPOT_PASS})"
+echo "    3. Open Safari and go to http://192.168.4.1"
+echo "    4. The web UI will guide you through Developer Mode setup if needed"
 echo ""

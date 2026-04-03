@@ -19,6 +19,9 @@
     const deviceModel = document.getElementById("device-model");
     const deviceIos = document.getElementById("device-ios");
     const tunnelStatus = document.getElementById("tunnel-status");
+    const devmodeBanner = document.getElementById("devmode-banner");
+    const btnRevealDevmode = document.getElementById("btn-reveal-devmode");
+    const btnRecheckDevmode = document.getElementById("btn-recheck-devmode");
 
     let deviceConnected = false;
     let toastTimeout = null;
@@ -82,6 +85,8 @@
     // ---- UI state ----
 
     function updateDeviceUI(device, tunnel) {
+        devmodeBanner.classList.add("hidden");
+
         if (!device) {
             statusEl.className = "status disconnected";
             statusText.textContent = "No device connected";
@@ -121,6 +126,20 @@
         }
     }
 
+    function showDevmodeBanner(device) {
+        deviceName.textContent = device.name;
+        deviceModel.textContent = device.model;
+        deviceIos.textContent = device.ios_version;
+        deviceInfo.classList.remove("hidden");
+        tunnelStatus.textContent = "Needs Developer Mode";
+        statusEl.className = "status error";
+        statusText.textContent = device.name + " — Developer Mode Off";
+        devmodeBanner.classList.remove("hidden");
+        deviceConnected = false;
+        btnSet.disabled = true;
+        btnClear.disabled = true;
+    }
+
     function updateCoordInputs(lat, lon) {
         latInput.value = lat.toFixed(6);
         lonInput.value = lon.toFixed(6);
@@ -153,6 +172,11 @@
             case "device_connected":
                 updateDeviceUI(data, "connecting");
                 showToast("iPhone detected — connecting...", "info");
+                break;
+
+            case "developer_mode_needed":
+                showDevmodeBanner(data);
+                showToast("Developer Mode required — follow the steps below", "error");
                 break;
 
             case "device_disconnected":
@@ -228,6 +252,50 @@
     btnSearch.addEventListener("click", doSearch);
     searchInput.addEventListener("keydown", (e) => {
         if (e.key === "Enter") doSearch();
+    });
+
+    // ---- Developer Mode buttons ----
+
+    btnRevealDevmode.addEventListener("click", async () => {
+        btnRevealDevmode.disabled = true;
+        btnRevealDevmode.textContent = "Revealing...";
+        try {
+            const resp = await fetch("/api/developer-mode/reveal", { method: "POST" });
+            const data = await resp.json();
+            if (data.success) {
+                showToast("Toggle revealed! Now enable it in Settings", "success");
+                btnRevealDevmode.textContent = "Done — Check Settings";
+            } else {
+                showToast("Failed: " + (data.error || "Unknown error"), "error");
+                btnRevealDevmode.textContent = "Reveal Developer Mode";
+                btnRevealDevmode.disabled = false;
+            }
+        } catch (e) {
+            showToast("Network error: " + e.message, "error");
+            btnRevealDevmode.textContent = "Reveal Developer Mode";
+            btnRevealDevmode.disabled = false;
+        }
+    });
+
+    btnRecheckDevmode.addEventListener("click", async () => {
+        btnRecheckDevmode.disabled = true;
+        btnRecheckDevmode.textContent = "Checking...";
+        try {
+            const resp = await fetch("/api/developer-mode/recheck", { method: "POST" });
+            const data = await resp.json();
+            if (data.success && data.developer_mode) {
+                showToast("Developer Mode enabled! Connecting...", "success");
+                devmodeBanner.classList.add("hidden");
+            } else if (data.success && !data.developer_mode) {
+                showToast("Developer Mode still off — enable it in Settings", "error");
+            } else {
+                showToast("Error: " + (data.error || "Unknown"), "error");
+            }
+        } catch (e) {
+            showToast("Network error: " + e.message, "error");
+        }
+        btnRecheckDevmode.textContent = "Check Again";
+        btnRecheckDevmode.disabled = false;
     });
 
     // ---- Init ----
